@@ -1,17 +1,26 @@
 package com.xp.pro.mocklocationlib;
 
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.Service;
 import android.content.Context;
-import android.location.Criteria;
+import android.content.Intent;
 import android.location.Location;
 import android.location.LocationManager;
-import android.location.LocationProvider;
+import android.os.Binder;
 import android.os.Build;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.HandlerThread;
+import android.os.IBinder;
+import android.os.Message;
 import android.os.SystemClock;
-import android.provider.Settings;
-
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.List;
+import android.support.v4.app.NotificationCompat;
+import android.util.Log;
+import android.widget.Toast;
+import java.util.UUID;
+import java.util.logging.Logger;
 
 /**
  * MockLocationManager:模拟地址管理类
@@ -20,194 +29,268 @@ import java.util.List;
  * Email: xiexiepro@gmail.com
  * Blog: http://XieXiePro.github.io
  */
-public class MockLocationManager {
+public class MockLocationManager extends Service {
 
-    /**
-     * 位置管理器
-     */
-    public LocationManager locationManager = null;
+    public static final int RunCode = 1;
 
-    public LocationManager getLocationManager() {
-        return locationManager;
+    public static final int StopCode = 2;
+
+
+
+    private String TAG = "MockGpsService";
+
+
+    private Handler handler;
+
+    private HandlerThread handlerThread;
+
+    private boolean isFloatWindowStart = false;
+
+    private boolean isStop = true;
+
+    private String latLngInfo = "104.06121778639009&30.544111926165282";
+
+    private LocationManager locationManager;
+
+    public static String getUUID() {
+        return UUID.randomUUID().toString();
     }
 
-    /**
-     * 模拟位置的提供者
-     */
-    private List<String> mockProviders = null;
+    private void rmGPSTestProvider() {
+        try {
+            if (this.locationManager.isProviderEnabled("gps")) {
+                Log.d(this.TAG, "now remove GPSProvider");
+                this.locationManager.removeTestProvider("gps");
+                return;
+            }
+            Log.d(this.TAG, "GPSProvider is not enabled");
 
-    public List<String> getMockProviders() {
-        return mockProviders;
+            return;
+        } catch (Exception exception) {
+            exception.printStackTrace();
+            Log.d(this.TAG, "rmGPSProvider error");
+
+            return;
+        }
     }
 
-    /**
-     * 是否成功addTestProvider，默认为true，软件启动时为防止意外退出导致未重置，重置一次
-     * Android 6.0系统以下，可以通过Setting.Secure.ALLOW_MOCK_LOCATION获取是否【允许模拟位置】，
-     * 当【允许模拟位置】开启时，可addTestProvider；
-     * Android 6.0系统及以上，弃用Setting.Secure.ALLOW_MOCK_LOCATION变量，没有【允许模拟位置】选项，
-     * 增加【选择模拟位置信息应用】，此时需要选择当前应用，才可以addTestProvider，
-     * 但未找到获取当前选择应用的方法，因此通过addTestProvider是否成功来判断是否可用模拟位置。
-     */
-    private boolean hasAddTestProvider = true;
-
-    /**
-     * 启动和停止模拟位置的标识
-     */
-    public boolean bRun = false;
-
-    public double latitude;
-
-    public double longitude;
-
-
-    /**
-     * 初始化服务
-     *
-     * @param context
-     */
-    public void initService(Context context) {
-        /**
-         * 模拟位置服务
-         */
-        mockProviders = new ArrayList<>();
-        mockProviders.add(LocationManager.GPS_PROVIDER);
-//        mockProviders.add(LocationManager.NETWORK_PROVIDER);
-
-        locationManager = (LocationManager) context.getSystemService(Context.LOCATION_SERVICE);
-
-        // 防止程序意外终止，没有停止模拟GPS
-        stopMockLocation();
+    private void rmNetworkTestProvider() {
+        try {
+            if (this.locationManager.isProviderEnabled("network")) {
+                Log.d(this.TAG, "now remove NetworkProvider");
+                this.locationManager.removeTestProvider("network");
+                return;
+            }
+            Log.d(this.TAG, "NetworkProvider is not enabled");
+            return;
+        } catch (Exception exception) {
+            exception.printStackTrace();
+            Log.d(this.TAG, "rmNetworkProvider error");
+            return;
+        }
     }
 
-    /**
-     * 模拟位置是否启用
-     * 若启用，则addTestProvider
-     */
-    public boolean getUseMockPosition(Context context) {
-        // Android 6.0以下，通过Setting.Secure.ALLOW_MOCK_LOCATION判断
-        // Android 6.0及以上，需要【选择模拟位置信息应用】，未找到方法，因此通过addTestProvider是否可用判断
-        boolean canMockPosition = (Settings.Secure.getInt(context.getContentResolver(), Settings.Secure.ALLOW_MOCK_LOCATION, 0) != 0)
-                || Build.VERSION.SDK_INT > 22;
-        if (canMockPosition && hasAddTestProvider == false) {
+    private void setGPSLocation() {
+
+
+        String[] arrayOfString = this.latLngInfo.split("&");
+        LocationBean latLng = new LocationBean(Double.valueOf(arrayOfString[0]).doubleValue(), Double.valueOf(arrayOfString[1]).doubleValue());
+        try {
+            this.locationManager.setTestProviderLocation("gps", generateLocation(latLng));
+        } catch (Exception exception) {
+            Log.d(this.TAG, "setGPSLocation error");
+            exception.printStackTrace();
+        }
+    }
+
+    private void setGPSTestProvider() {
+        this.locationManager.getProvider("gps");
+        try {
+            this.locationManager.addTestProvider("gps", false, true, true, false, true, true, true, 0, 5);
+            Log.d(this.TAG, "addTestProvider[GPS_PROVIDER] success");
+
+        } catch (Exception exception) {
+            exception.printStackTrace();
+            Log.d(this.TAG, "addTestProvider[GPS_PROVIDER] error");
+        }
+        if (!this.locationManager.isProviderEnabled("gps"))
             try {
-                for (String providerStr : mockProviders) {
-                    LocationProvider provider = locationManager.getProvider(providerStr);
-                    if (provider != null) {
-                        locationManager.addTestProvider(
-                                provider.getName()
-                                , provider.requiresNetwork()
-                                , provider.requiresSatellite()
-                                , provider.requiresCell()
-                                , provider.hasMonetaryCost()
-                                , provider.supportsAltitude()
-                                , provider.supportsSpeed()
-                                , provider.supportsBearing()
-                                , provider.getPowerRequirement()
-                                , provider.getAccuracy());
-                    } else {
-                        if (providerStr.equals(LocationManager.GPS_PROVIDER)) {
-                            locationManager.addTestProvider(
-                                    providerStr
-                                    , true, true, false, false, true, true, true
-                                    , Criteria.POWER_HIGH, Criteria.ACCURACY_FINE);
-                        } else if (providerStr.equals(LocationManager.NETWORK_PROVIDER)) {
-                            locationManager.addTestProvider(
-                                    providerStr
-                                    , true, false, true, false, false, false, false
-                                    , Criteria.POWER_LOW, Criteria.ACCURACY_FINE);
-                        } else {
-                            locationManager.addTestProvider(
-                                    providerStr
-                                    , false, false, false, false, true, true, true
-                                    , Criteria.POWER_LOW, Criteria.ACCURACY_FINE);
-                        }
-                    }
-                    locationManager.setTestProviderEnabled(providerStr, true);
-                    locationManager.setTestProviderStatus(providerStr, LocationProvider.AVAILABLE, null, System.currentTimeMillis());
-                }
-                hasAddTestProvider = true;  // 模拟位置可用
-                canMockPosition = true;
-            } catch (SecurityException e) {
-                canMockPosition = false;
+                this.locationManager.setTestProviderEnabled("gps", true);
+            } catch (Exception exception) {
+                exception.printStackTrace();
+                Log.d(this.TAG, "setTestProviderEnabled[GPS_PROVIDER] error");
             }
-        }
-        if (canMockPosition == false) {
-            stopMockLocation();
-        }
-        return canMockPosition;
+        this.locationManager.setTestProviderStatus("gps", 2, null, System.currentTimeMillis());
     }
 
-    /**
-     * 取消位置模拟，以免启用模拟数据后无法还原使用系统位置
-     * 若模拟位置未开启，则removeTestProvider将会抛出异常；
-     * 若已addTestProvider后，关闭模拟位置，未removeTestProvider将导致系统GPS无数据更新；
-     */
-    public void stopMockLocation() {
-        if (hasAddTestProvider) {
-            for (String provider : mockProviders) {
+    private void setNetworkTestProvider() {
+        try {
+            this.locationManager.addTestProvider("network", false, false, false, false, false, false, false, 1, 1);
+            Log.d(this.TAG, "addTestProvider[NETWORK_PROVIDER] success");
+
+        } catch (Exception exception) {
+            exception.printStackTrace();
+            Log.d(this.TAG, "addTestProvider[NETWORK_PROVIDER] error");
+        }
+        if (!this.locationManager.isProviderEnabled("network"))
+            try {
+                this.locationManager.setTestProviderEnabled("network", true);
+                return;
+            } catch (Exception exception) {
+                exception.printStackTrace();
+                Log.d(this.TAG, "setTestProviderEnabled[NETWORK_PROVIDER] error");
+            }
+    }
+
+    private void setTestProviderLocation() {
+        String str = this.TAG;
+        StringBuilder stringBuilder = new StringBuilder();
+        stringBuilder.append("setNetworkLocation: ");
+        stringBuilder.append(this.latLngInfo);
+        Log.d(str, stringBuilder.toString());
+
+        String[] arrayOfString = this.latLngInfo.split("&");
+        LocationBean latLng = new LocationBean(Double.valueOf(arrayOfString[0]).doubleValue(), Double.valueOf(arrayOfString[1]).doubleValue());
+        try {
+            this.locationManager.setTestProviderLocation("network", generateLocation(latLng));
+            return;
+        } catch (Exception exception) {
+            Log.d(this.TAG, "setNetworkLocation error");
+            exception.printStackTrace();
+            return;
+        }
+    }
+
+    public void DisplayToast(String paramString) {
+        Toast toast = Toast.makeText((Context)this, paramString, 1);
+        toast.setGravity(48, 0, 220);
+        toast.show();
+    }
+
+    public Location generateLocation(LocationBean paramLatLng) {
+        Location location = new Location("gps");
+        location.setAccuracy(2.0F);
+        location.setAltitude(55.0D);
+        location.setBearing(1.0F);
+        Bundle bundle = new Bundle();
+        bundle.putInt("satellites", 7);
+        location.setExtras(bundle);
+        location.setLatitude(paramLatLng.getLatitude());
+        location.setLongitude(paramLatLng.getLongitude());
+        location.setTime(System.currentTimeMillis());
+        if (Build.VERSION.SDK_INT >= 17)
+            location.setElapsedRealtimeNanos(SystemClock.elapsedRealtimeNanos());
+        return location;
+    }
+
+    public void getProviders() {
+        for (String str : this.locationManager.getProviders(true)) {
+            Log.d("PROV", str);
+        }
+    }
+
+    public IBinder onBind(Intent paramIntent) {
+        return null;
+    }
+
+    public void onCreate() {
+        Log.d(this.TAG, "onCreate");
+        super.onCreate();
+        this.locationManager = (LocationManager)getSystemService("location");
+        getProviders();
+        rmNetworkTestProvider();
+        rmGPSTestProvider();
+        setNetworkTestProvider();
+        setGPSTestProvider();
+        HandlerThread handlerThread = new HandlerThread(getUUID(), -2);
+        this.handlerThread = handlerThread;
+        handlerThread.start();
+        Handler handler = new Handler(this.handlerThread.getLooper()) {
+            public void handleMessage(Message param1Message) {
                 try {
-                    locationManager.removeTestProvider(provider);
-                } catch (Exception ex) {
-                    // 此处不需要输出日志，若未成功addTestProvider，则必然会出错
-                    // 这里是对于非正常情况的预防措施
+                    Thread.sleep(128L);
+                    if (!MockLocationManager.this.isStop) {
+                        MockLocationManager.this.setTestProviderLocation();
+                        MockLocationManager.this.setGPSLocation();
+                        sendEmptyMessage(0);
+                        Intent intent = new Intent();
+                        intent.putExtra("statusCode", 1);
+                        intent.setAction("com.example.service.MockGpsService");
+                        MockLocationManager.this.sendBroadcast(intent);
+                        return;
+                    }
+                } catch (InterruptedException interruptedException) {
+                    interruptedException.printStackTrace();
+                    Log.d(MockLocationManager.this.TAG, "handleMessage error");
+                    Thread.currentThread().interrupt();
                 }
             }
-            hasAddTestProvider = false;
+        };
+        this.handler = handler;
+        handler.sendEmptyMessage(0);
+    }
+
+    public void onDestroy() {
+        Log.d(this.TAG, "onDestroy");
+
+        this.isStop = true;
+        try {
+           // this.floatWindow.hideFloatWindow();
+            this.isFloatWindowStart = false;
+        } catch (Exception exception) {
+            exception.printStackTrace();
         }
+        this.handler.removeMessages(0);
+        this.handlerThread.quit();
+        rmNetworkTestProvider();
+        rmGPSTestProvider();
+        stopForeground(true);
+        Intent intent = new Intent();
+        intent.putExtra("statusCode", 2);
+        intent.setAction("com.example.service.MockGpsService");
+        sendBroadcast(intent);
+        super.onDestroy();
     }
 
-    /**
-     * 模拟位置线程
-     */
-    private class RunnableMockLocation implements Runnable {
+    public void onStart(Intent paramIntent, int paramInt) {
+        super.onStart(paramIntent, paramInt);
+        Log.d(this.TAG, "onStart");
+    }
 
-        @Override
-        public void run() {
-            while (true) {
-                try {
-                    Thread.sleep(1000);
+    public int onStartCommand(Intent paramIntent, int paramInt1, int paramInt2) {
+        Notification notification;
+        Log.d(this.TAG, "onStartCommand");
 
-                    if (hasAddTestProvider == false) {
-                        continue;
-                    }
-
-                    if (bRun == false) {
-                        stopMockLocation();
-                        continue;
-                    }
-                    try {
-                        // 模拟位置（addTestProvider成功的前提下）
-                        for (String providerStr : mockProviders) {
-                            Location mockLocation = new Location(providerStr);
-                            mockLocation.setLatitude(latitude);   // 维度（度）
-                            mockLocation.setLongitude(longitude);  // 经度（度）
-                            mockLocation.setAccuracy(0.1f);   // 精度（米）
-                            mockLocation.setTime(new Date().getTime());   // 本地时间
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
-                                mockLocation.setElapsedRealtimeNanos(SystemClock.elapsedRealtimeNanos());
-                            }
-                            locationManager.setTestProviderLocation(providerStr, mockLocation);
-                        }
-                    } catch (Exception e) {
-                        // 防止用户在软件运行过程中关闭模拟位置或选择其他应用
-                        stopMockLocation();
-                    }
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
-                } catch (Exception e) {
-                    e.printStackTrace();
-                }
-            }
+        NotificationManager notificationManager = (NotificationManager)getSystemService(Context.NOTIFICATION_SERVICE);
+        if (Build.VERSION.SDK_INT >= 26) {
+            NotificationChannel notificationChannel = new NotificationChannel("channel_01", "channel_name", 2);
+            Log.i(this.TAG, notificationChannel.toString());
+            if (notificationManager != null)
+                notificationManager.createNotificationChannel(notificationChannel);
+            notification = (new Notification.Builder((Context)this)).setChannelId("channel_01").setContentTitle("模拟定位...").setContentText("MockLocation service is running").setSmallIcon(R.drawable.icon_openmap_mark).build();
+        } else {
+            notification = (new NotificationCompat.Builder((Context)this)).setContentTitle("模拟定位...").setContentText("MockLocation service is running").setSmallIcon(R.drawable.icon_openmap_mark).setOngoing(true).setChannelId("channel_01").build();
         }
+        startForeground(1, notification);
+        this.latLngInfo = paramIntent.getStringExtra("key");
+
+        this.isStop = false;
+        if (!this.isFloatWindowStart) {
+//            FloatWindow floatWindow = new FloatWindow(this);
+//            this.floatWindow = floatWindow;
+//            try {
+//                floatWindow.showFloatWindow();
+//                this.isFloatWindowStart = true;
+//            } catch (Exception exception) {
+//                exception.printStackTrace();
+//            }
+        }
+        return super.onStartCommand(paramIntent, paramInt1, paramInt2);
     }
 
-
-    public void startThread() {
-        new Thread(new RunnableMockLocation()).start();
-    }
-
-    public void setLocationData(double lat, double lon) {
-        latitude = lat;
-        longitude = lon;
+    public class ServiceBinder extends Binder {
+        public MockLocationManager getService() {
+            return MockLocationManager.this;
+        }
     }
 }
