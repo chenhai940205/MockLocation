@@ -259,8 +259,8 @@ public class LocationWidget extends LinearLayout {
     private void setLocationData(Location location) {
         tvProvider.setText(location.getProvider());
         tvTime.setText(new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date(location.getTime())));
-        tvLatitude.setText(String.format("%s", location.getLatitude()));
-        tvLongitude.setText(String.format("%s", location.getLongitude()));
+      //  tvLatitude.setText(String.format("%s", location.getLatitude()));
+      //  tvLongitude.setText(String.format("%s", location.getLongitude()));
     }
 
 

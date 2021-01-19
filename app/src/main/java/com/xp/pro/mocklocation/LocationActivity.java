@@ -21,8 +21,8 @@ public class LocationActivity extends Activity {
         double latitude;
         double longitude;
         try {
-            latitude = getIntent().getDoubleExtra("latitude", 22.568431);
-            longitude = getIntent().getDoubleExtra("longitude", 113.960533);
+            latitude = getIntent().getDoubleExtra("latitude", 22.526579);
+            longitude = getIntent().getDoubleExtra("longitude", 113.940327);
 
         } catch (Exception e) {
             latitude = 0;
